@@ -44,15 +44,6 @@ class ClapToFindApp : Application() {
                 description = "Alerts when your phone is found"
             }
             manager.createNotificationChannel(alertChannel)
-
-            val controlChannel = NotificationChannel(
-                CHANNEL_CONTROL,
-                "Quick Controls",
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "Notification bar control for find my phone"
-            }
-            manager.createNotificationChannel(controlChannel)
         }
     }
 
@@ -62,9 +53,7 @@ class ClapToFindApp : Application() {
 
         const val CHANNEL_SERVICE = "detection_service"
         const val CHANNEL_ALERT = "phone_found_alert"
-        const val CHANNEL_CONTROL = "detection_control"
         const val NOTIFICATION_SERVICE_ID = 1001
         const val NOTIFICATION_ALERT_ID = 1002
-        const val NOTIFICATION_CONTROL_ID = 1003
     }
 }

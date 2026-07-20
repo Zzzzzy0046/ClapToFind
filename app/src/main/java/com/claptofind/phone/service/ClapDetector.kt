@@ -11,6 +11,7 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Clap/whistle detector: MediaPipe AudioClassifier + YAMNet (AUDIO_CLIPS mode).
@@ -28,14 +29,29 @@ class ClapDetector(private val context: Context) {
         private const val SAMPLE_RATE = 16000
         private const val POLL_MS = 500L
         private const val CLAP_WINDOW_MS = 1500L
-        private const val BUFFER_SIZE = 31200
-        private const val MIN_SCORE = 0.25f
+        // Calculated from: 16000 samples/s * 4 bytes(float)/sample * 0.975s ≈ 62400; rounded for buffer alignment
+        private val BUFFER_SIZE = AudioRecord.getMinBufferSize(SAMPLE_RATE,
+            android.media.AudioFormat.CHANNEL_IN_MONO,
+            android.media.AudioFormat.ENCODING_PCM_FLOAT
+        ).let { if (it > 0) it else 31200 }
+
+        /**
+         * Map SoundSensitivity to YAMNet score threshold.
+         * SoundSensitivity.dbThreshold represents the approximate dB level; lower dB = more sensitive.
+         * We map: VERY_HIGH(45dB) → 0.15, HIGH(55dB) → 0.25, MEDIUM(65dB) → 0.40.
+         */
+        fun sensitivityToThreshold(sensitivity: com.claptofind.phone.data.SoundSensitivity): Float = when (sensitivity) {
+            com.claptofind.phone.data.SoundSensitivity.VERY_HIGH -> 0.15f
+            com.claptofind.phone.data.SoundSensitivity.HIGH -> 0.25f
+            com.claptofind.phone.data.SoundSensitivity.MEDIUM -> 0.40f
+        }
     }
 
     private var classifier: AudioClassifier? = null
     private var recorder: AudioRecord? = null
     private var audioData: AudioData? = null
     @Volatile private var isRunning = false
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var job: Job? = null
 
     private val _detectionEvents = MutableStateFlow<DetectionEvent?>(null)
@@ -51,6 +67,8 @@ class ClapDetector(private val context: Context) {
     ): Boolean {
         if (isRunning) return true
 
+        val threshold = sensitivityToThreshold(sensitivity)
+
         try {
             classifier = AudioClassifier.createFromOptions(
                 context,
@@ -58,7 +76,7 @@ class ClapDetector(private val context: Context) {
                     .setBaseOptions(BaseOptions.builder().setModelAssetPath("yamnet.tflite").build())
                     .setRunningMode(RunningMode.AUDIO_CLIPS)
                     .setMaxResults(5)
-                    .setScoreThreshold(MIN_SCORE)
+                    .setScoreThreshold(threshold)
                     .build()
             )
 
@@ -67,11 +85,25 @@ class ClapDetector(private val context: Context) {
                 classifier!!.createAudioRecord(1, SAMPLE_RATE, BUFFER_SIZE)
             } catch (_: Exception) {
                 Log.w(TAG, "createAudioRecord failed, manual fallback")
-                AudioRecord(
-                    MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
-                    android.media.AudioFormat.CHANNEL_IN_MONO,
-                    android.media.AudioFormat.ENCODING_PCM_FLOAT, BUFFER_SIZE
-                )
+                try {
+                    AudioRecord(
+                        MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
+                        android.media.AudioFormat.CHANNEL_IN_MONO,
+                        android.media.AudioFormat.ENCODING_PCM_16BIT, BUFFER_SIZE
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Manual AudioRecord fallback also failed: ${e.message}")
+                    classifier?.close()
+                    classifier = null
+                    return false
+                }
+            }
+
+            val rec = recorder ?: run {
+                classifier?.close()
+                classifier = null
+                Log.e(TAG, "Failed to create AudioRecord")
+                return false
             }
 
             audioData = AudioData.create(
@@ -82,19 +114,19 @@ class ClapDetector(private val context: Context) {
                 SAMPLE_RATE
             )
 
-            recorder!!.startRecording()
+            rec.startRecording()
             isRunning = true
             recentClaps.clear()
 
-            job = CoroutineScope(Dispatchers.IO).launch {
+            job = scope.launch {
                 while (isActive && isRunning) {
-                    val rec = recorder ?: break
+                    val currentRec = recorder ?: break
                     val ad = audioData ?: break
                     val clf = classifier ?: break
 
-                    if (rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                    if (currentRec.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                         try {
-                            ad.load(rec)
+                            ad.load(currentRec)
                             val result = clf.classify(ad)
 
                             val crList = result.classificationResults()
@@ -111,7 +143,7 @@ class ClapDetector(private val context: Context) {
                                         Log.d(TAG, "YAMNet: $label (${"%.3f".format(score)})")
 
                                         when {
-                                            label.equals("Clapping", ignoreCase = true) && score > MIN_SCORE -> {
+                                            label.equals("Clapping", ignoreCase = true) && score > threshold -> {
                                                 recentClaps.add(now)
                                                 while (recentClaps.isNotEmpty() &&
                                                     now - recentClaps.first() > CLAP_WINDOW_MS
@@ -121,7 +153,7 @@ class ClapDetector(private val context: Context) {
                                                     recentClaps.clear()
                                                 }
                                             }
-                                            label.equals("Whistling", ignoreCase = true) && enableWhistle && score > MIN_SCORE -> {
+                                            label.equals("Whistling", ignoreCase = true) && enableWhistle && score > threshold -> {
                                                 _detectionEvents.value = DetectionEvent(DetectionType.WHISTLE, score, label)
                                             }
                                         }
@@ -136,21 +168,23 @@ class ClapDetector(private val context: Context) {
                 }
             }
 
-            Log.d(TAG, "YAMNet detector started (AUDIO_CLIPS, ${POLL_MS}ms)")
+            Log.d(TAG, "YAMNet detector started (AUDIO_CLIPS, ${POLL_MS}ms, threshold=$threshold)")
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start: ${e.message}", e)
+            try { classifier?.close() } catch (_: Exception) {}
+            classifier = null
             return false
         }
     }
 
     fun stopListening() {
         isRunning = false
-        job?.cancel(); job = null
-        try { recorder?.stop(); recorder?.release() } catch (_: Exception) {}
+        scope.coroutineContext.cancelChildren()
+        try { recorder?.stop(); recorder?.release() } catch (e: Exception) { Log.w(TAG, "Failed to release recorder: ${e.message}") }
         recorder = null
         audioData = null
-        try { classifier?.close() } catch (_: Exception) {}
+        try { classifier?.close() } catch (e: Exception) { Log.w(TAG, "Failed to close classifier: ${e.message}") }
         classifier = null
         recentClaps.clear()
     }

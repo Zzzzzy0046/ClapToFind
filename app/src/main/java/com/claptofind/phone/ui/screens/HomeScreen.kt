@@ -44,13 +44,12 @@ fun HomeScreen(
     onNavigateToFlashlightSettings: () -> Unit,
     onNavigateToVibrateSettings: () -> Unit,
     onNavigateToSettings: () -> Unit,
-    onNavigateToHowToUse: () -> Unit,
-    onEnableSuccess: () -> Unit,
-    onDisableSuccess: () -> Unit
+    onNavigateToHowToUse: () -> Unit
 ) {
     val context = LocalContext.current
     val app = ClapToFindApp.instance
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val isDetectionEnabled by app.prefsManager.isDetectionEnabled.collectAsState(initial = false)
     val scheduleEnabled by app.prefsManager.scheduleEnabled.collectAsState(initial = false)
@@ -93,7 +92,6 @@ fun HomeScreen(
             scope.launch {
                 app.prefsManager.setDetectionEnabled(true)
                 DetectionService.start(context)
-                onEnableSuccess()
             }
         }
     }
@@ -122,13 +120,18 @@ fun HomeScreen(
     ) {
         scope.launch {
             if (targetEnabled) {
-                // Need mic first
+                // Check mic (required for functionality)
                 if (!hasMicPermission()) {
                     showMicPermissionDialog = true
                     return@launch
                 }
+                // Proceed with detection; show notification dialog non-blocking
                 app.prefsManager.setDetectionEnabled(true)
                 DetectionService.start(context)
+                onSuccess()
+                if (!hasNotificationPermission()) {
+                    showNotificationPermissionDialog = true
+                }
                 onSuccess()
             } else {
                 app.prefsManager.setDetectionEnabled(false)
@@ -140,13 +143,17 @@ fun HomeScreen(
 
     // Determine status text
     val statusText = when {
-        !isDetectionEnabled -> "Click here to activate"
+        !isDetectionEnabled -> "Tap to activate"
         isInSchedulePeriod -> "Enabled – Temporarily paused until ${String.format("%02d:%02d", scheduleEndHour, scheduleEndMinute)} (Scheduled)"
         else -> "Detecting Now"
     }
 
     val statusColor by animateColorAsState(
-        targetValue = if (isDetectionEnabled && !isInSchedulePeriod) ActiveGreen else InactiveRed,
+        targetValue = when {
+            !isDetectionEnabled -> InactiveRed
+            isInSchedulePeriod -> WarningYellow
+            else -> ActiveGreen
+        },
         label = "statusColor"
     )
 
@@ -172,6 +179,7 @@ fun HomeScreen(
     )
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             Surface(shadowElevation = 2.dp) {
                 Row(
@@ -182,19 +190,11 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Find My Phone",
+                        "Clap To Find",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Row {
-                        // Subscription icon (placeholder - no real subscription)
-                        IconButton(onClick = { /* subscription - skipped */ }) {
-                            Icon(
-                                Icons.Outlined.WorkspacePremium,
-                                contentDescription = "Premium",
-                                tint = PremiumGold
-                            )
-                        }
                         IconButton(onClick = onNavigateToSettings) {
                             Icon(Icons.Outlined.Settings, contentDescription = "Settings")
                         }
@@ -222,33 +222,30 @@ fun HomeScreen(
                             if (isDetectionEnabled && !isInSchedulePeriod) {
                                 Modifier.scale(pulseScale)
                             } else Modifier
-                        ),
+                        )
+                        .clip(CircleShape)
+                        .clickable {
+                            toggleDetection(
+                                app = app,
+                                targetEnabled = !isDetectionEnabled,
+                                onSuccess = {
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Detection activated")
+                                    }
+                                },
+                                onDisable = {
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Detection deactivated")
+                                    }
+                                }
+                            )
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     // Outer ring
                     Surface(
                         modifier = Modifier
-                            .size(180.dp)
-                            .clip(CircleShape)
-                            .clickable {
-                                if (!isDetectionEnabled) {
-                                if (!hasMicPermission()) {
-                                    showMicPermissionDialog = true
-                                } else {
-                                    scope.launch {
-                                        app.prefsManager.setDetectionEnabled(true)
-                                        DetectionService.start(context)
-                                        onEnableSuccess()
-                                    }
-                                }
-                            } else {
-                                scope.launch {
-                                    app.prefsManager.setDetectionEnabled(false)
-                                    DetectionService.stop(context)
-                                    onDisableSuccess()
-                                }
-                            }
-                            },
+                            .size(180.dp),
                         shape = CircleShape,
                         color = statusColor.copy(alpha = 0.15f)
                     ) {
@@ -336,7 +333,7 @@ fun HomeScreen(
                 // Flashlight Settings Card
                 SettingsCard(
                     icon = Icons.Filled.FlashlightOn,
-                    title = "FlashLight",
+                    title = "Flashlight",
                     subtitle = "Blink patterns & effects",
                     onClick = onNavigateToFlashlightSettings
                 )
@@ -472,26 +469,28 @@ fun HomeScreen(
         )
     }
 
+    // Notification permission launcher
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* Continue with detection regardless of choice */ }
+
     if (showNotificationPermissionDialog) {
         AlertDialog(
             onDismissRequest = { showNotificationPermissionDialog = false },
             icon = { Icon(Icons.Filled.Notifications, contentDescription = null) },
             title = { Text("Notification Permission Required") },
-            text = { Text("Turn on notifications to control the feature in notification bar.") },
+            text = { Text("We need notification permission to show control buttons and alert you when your phone is found.") },
             confirmButton = {
                 TextButton(onClick = {
                     showNotificationPermissionDialog = false
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.parse("package:${context.packageName}")
-                    }
-                    context.startActivity(intent)
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }) {
-                    Text("Open Settings")
+                    Text("Grant Permission")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showNotificationPermissionDialog = false }) {
-                    Text("Cancel")
+                    Text("Skip")
                 }
             }
         )

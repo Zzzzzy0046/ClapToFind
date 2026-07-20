@@ -9,8 +9,11 @@ import android.widget.RemoteViews
 import com.claptofind.phone.ClapToFindApp
 import com.claptofind.phone.R
 import com.claptofind.phone.service.DetectionService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 class FindPhoneWidget : AppWidgetProvider() {
 
@@ -20,7 +23,7 @@ class FindPhoneWidget : AppWidgetProvider() {
         appWidgetIds: IntArray
     ) {
         for (widgetId in appWidgetIds) {
-            updateWidget(context, appWidgetManager, widgetId)
+            runBlocking { updateWidgetSync(context, appWidgetManager, widgetId) }
         }
     }
 
@@ -33,33 +36,39 @@ class FindPhoneWidget : AppWidgetProvider() {
                 AppWidgetManager.INVALID_APPWIDGET_ID
             )
             if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
-                handleToggle(context, appWidgetManager, appWidgetId)
+                val pendingResult = goAsync()
+                val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
+                scope.launch {
+                    try {
+                        handleToggle(context, appWidgetManager, appWidgetId)
+                    } finally {
+                        pendingResult.finish()
+                    }
+                }
             }
         }
     }
 
-    private fun handleToggle(
+    private suspend fun handleToggle(
         context: Context,
         appWidgetManager: AppWidgetManager,
         appWidgetId: Int
-    ) {
+    ) = withContext(Dispatchers.IO) {
         val app = context.applicationContext as ClapToFindApp
-        runBlocking {
-            val current = app.prefsManager.isDetectionEnabled.first()
-            val newState = !current
-            app.prefsManager.setDetectionEnabled(newState)
-            if (newState) DetectionService.start(context) else DetectionService.stop(context)
-        }
-        updateWidget(context, appWidgetManager, appWidgetId)
+        val current = app.prefsManager.isDetectionEnabled.first()
+        val newState = !current
+        app.prefsManager.setDetectionEnabled(newState)
+        if (newState) DetectionService.start(context) else DetectionService.stop(context)
+        updateWidgetSync(context, appWidgetManager, appWidgetId)
     }
 
-    private fun updateWidget(
+    private suspend fun updateWidgetSync(
         context: Context,
         appWidgetManager: AppWidgetManager,
         appWidgetId: Int
     ) {
         val app = context.applicationContext as ClapToFindApp
-        val isEnabled = runBlocking { app.prefsManager.isDetectionEnabled.first() }
+        val isEnabled = app.prefsManager.isDetectionEnabled.first()
 
         val views = RemoteViews(context.packageName, R.layout.widget_find_phone)
         views.setTextViewText(

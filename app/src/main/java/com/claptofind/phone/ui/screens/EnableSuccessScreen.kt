@@ -7,6 +7,7 @@ import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -26,20 +27,35 @@ fun EnableSuccessScreen(
     onBackToHome: () -> Unit
 ) {
     val context = LocalContext.current
+    var showBatteryDialog by remember { mutableStateOf(true) }
 
-    LaunchedEffect(Unit) {
-        // Request battery optimization exemption
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-            if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
-                try {
-                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                        data = Uri.parse("package:${context.packageName}")
-                    }
-                    context.startActivity(intent)
-                } catch (_: Exception) {}
+    // Battery optimization explanation card shown BEFORE the system dialog
+    if (showBatteryDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatteryDialog = false },
+            icon = { Icon(Icons.Filled.BatterySaver, contentDescription = null) },
+            title = { Text("Background Detection") },
+            text = {
+                Text(
+                    "To detect claps while your phone is in your pocket or bag, " +
+                    "Clap To Find Phone needs to run in the background.\n\n" +
+                    "This uses minimal battery. Without this, detection may stop " +
+                    "when your screen turns off."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showBatteryDialog = false
+                    requestBatteryExemption(context)
+                }) { Text("Allow Background") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showBatteryDialog = false
+                    onBackToHome()
+                }) { Text("Skip") }
             }
-        }
+        )
     }
 
     Box(
@@ -89,6 +105,20 @@ fun EnableSuccessScreen(
             ) {
                 Text("Back to home", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
+        }
+    }
+}
+
+private fun requestBatteryExemption(context: android.content.Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+            } catch (_: Exception) {}
         }
     }
 }

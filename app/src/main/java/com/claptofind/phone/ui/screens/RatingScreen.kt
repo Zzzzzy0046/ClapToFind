@@ -24,7 +24,7 @@ fun RatingScreen(
     onDismiss: () -> Unit,
     fromSettings: Boolean = false
 ) {
-    var rating by remember { mutableIntStateOf(if (fromSettings) 5 else 0) }
+    var rating by remember { mutableIntStateOf(0) }
     var showStarAnimation by remember { mutableStateOf(!fromSettings) }
     val starScale = remember { Animatable(0f) }
 
@@ -40,17 +40,17 @@ fun RatingScreen(
     val titleText: String
     val subtitleText: String
     when {
-        rating == 0 && !fromSettings -> {
-            emoji = "🤔"; titleText = "Rate your experience"; subtitleText = "The best we could have"
+        rating == 0 -> {
+            emoji = "🤔"; titleText = "Rate your experience"; subtitleText = "Your feedback helps us improve"
         }
         rating in 1..3 -> {
-            emoji = "😔"; titleText = "We apologize for the inconvenience."; subtitleText = "Please give us some feedback to improve our app"
+            emoji = "😔"; titleText = "We apologize for the inconvenience."; subtitleText = "Share your feedback to help us improve"
         }
         rating == 4 -> {
-            emoji = "😊"; titleText = "The pleasure is ours!"; subtitleText = "The best we could have"
+            emoji = "😊"; titleText = "The pleasure is ours!"; subtitleText = "Thank you for your support"
         }
         rating == 5 -> {
-            emoji = "🥳"; titleText = "Could you please give us the same rating on Google Play?"; subtitleText = ""
+            emoji = "🥳"; titleText = "Could you please share your rating on Google Play?"; subtitleText = ""
         }
         else -> {
             emoji = "🤔"; titleText = "Rate your experience"; subtitleText = ""
@@ -137,7 +137,12 @@ fun RatingScreen(
                 }
                 if (rating in 1..4) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(onClick = { onDismiss() }) { Text("Feedback") }
+                    TextButton(onClick = {
+                        scope.launch {
+                            app.prefsManager.setRatingAskShown(true)
+                        }
+                        onDismiss()
+                    }) { Text("Send Feedback") }
                 }
             }
         },

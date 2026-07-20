@@ -5,9 +5,14 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.content.pm.ServiceInfo
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
@@ -29,7 +34,34 @@ class DetectionService : LifecycleService() {
     private lateinit var prefsManager: com.claptofind.phone.data.PreferencesManager
     private lateinit var soundEngine: com.claptofind.phone.audio.SoundEngine
     private var wakeLock: PowerManager.WakeLock? = null
-    private var isAlerting = false
+    @Volatile private var isAlerting = false
+
+    // AudioFocus management
+    private var audioManager: AudioManager? = null
+    @Volatile private var hasAudioFocus = false
+    @Volatile private var wasPausedForAudioConflict = false
+
+    private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                // Phone call or other app took mic — pause detection
+                Log.w(TAG, "AudioFocus lost ($focusChange), pausing detection")
+                hasAudioFocus = false
+                pauseDetectionForAudioConflict()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                // Other app playing sound but we can keep recording quietly
+                Log.d(TAG, "AudioFocus loss transient can duck, continuing")
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                // Mic is ours again — resume detection
+                Log.d(TAG, "AudioFocus gained, resuming detection")
+                hasAudioFocus = true
+                resumeDetectionAfterAudioConflict()
+            }
+        }
+    }
 
     // Control notification action receiver
     private val controlReceiver = object : BroadcastReceiver() {
@@ -65,12 +97,20 @@ class DetectionService : LifecycleService() {
             addAction(ACTION_TOGGLE_DETECTION)
             addAction(ACTION_STOP_ALERT)
         }
-        registerReceiver(controlReceiver, filter, RECEIVER_EXPORTED)
+        registerReceiver(controlReceiver, filter, RECEIVER_NOT_EXPORTED)
 
-        startForeground(
-            ClapToFindApp.NOTIFICATION_SERVICE_ID,
-            createServiceNotification()
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                ClapToFindApp.NOTIFICATION_SERVICE_ID,
+                createServiceNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            )
+        } else {
+            startForeground(
+                ClapToFindApp.NOTIFICATION_SERVICE_ID,
+                createServiceNotification()
+            )
+        }
 
         // Observe detection events
         lifecycleScope.launch {
@@ -82,35 +122,41 @@ class DetectionService : LifecycleService() {
             }
         }
 
-        // Observe state changes
+        // Observe state changes — single combined collector to avoid races
         lifecycleScope.launch {
-            launch {
-                prefsManager.isDetectionEnabled.collect { enabled ->
-                    if (!enabled) stopDetection()
-                    else {
-                        val scheduleOn = prefsManager.scheduleEnabled.first()
-                        if (!scheduleOn) startDetection()
-                    }
-                    updateNotification()
-                }
-            }
-            launch {
-                prefsManager.scheduleEnabled.collect {
-                    val enabled = prefsManager.isDetectionEnabled.first()
-                    if (!enabled) return@collect
-                    val scheduleOn = prefsManager.scheduleEnabled.first()
-                    val startH = prefsManager.scheduleStartHour.first()
-                    val startM = prefsManager.scheduleStartMinute.first()
-                    val endH = prefsManager.scheduleEndHour.first()
-                    val endM = prefsManager.scheduleEndMinute.first()
-                    if (isInSchedulePeriod(scheduleOn, startH, startM, endH, endM)) {
+            combine(
+                prefsManager.isDetectionEnabled,
+                prefsManager.scheduleEnabled,
+                prefsManager.scheduleStartHour,
+                prefsManager.scheduleStartMinute,
+                prefsManager.scheduleEndHour,
+                prefsManager.scheduleEndMinute
+            ) { values ->
+                val enabled = values[0] as Boolean
+                val scheduleOn = values[1] as Boolean
+                val startH = values[2] as Int
+                val startM = values[3] as Int
+                val endH = values[4] as Int
+                val endM = values[5] as Int
+
+                if (!enabled) {
+                    stopDetection()
+                } else {
+                    val inSchedule = isInSchedulePeriod(scheduleOn, startH, startM, endH, endM)
+                    if (scheduleOn && inSchedule) {
                         stopDetection()
                     } else {
                         startDetection()
                     }
-                    updateNotification()
                 }
-            }
+                updateNotification()
+                // Keep WorkManager schedule check in sync with preference changes
+                if (scheduleOn && enabled) {
+                    schedulePeriodicCheck()
+                } else {
+                    cancelPeriodicCheck()
+                }
+            }.collect { }
         }
     }
 
@@ -130,12 +176,81 @@ class DetectionService : LifecycleService() {
     override fun onDestroy() {
         stopDetection()
         stopAlert()
+        releaseAudioFocus()
         unregisterReceiver(controlReceiver)
         super.onDestroy()
     }
 
+    private fun requestAudioFocus() {
+        if (hasAudioFocus) return
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setOnAudioFocusChangeListener(audioFocusListener)
+                    .build()
+                hasAudioFocus = audioManager?.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            } else {
+                @Suppress("DEPRECATION")
+                val result = audioManager?.requestAudioFocus(
+                    audioFocusListener,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
+                )
+                hasAudioFocus = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            }
+            if (!hasAudioFocus) {
+                Log.w(TAG, "AudioFocus request denied — another app may be using the mic")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "AudioFocus request failed: ${e.message}")
+        }
+    }
+
+    private fun releaseAudioFocus() {
+        if (!hasAudioFocus) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Focus released via AudioFocusRequest automatically on abandon
+            }
+            audioManager?.abandonAudioFocus(audioFocusListener)
+        } catch (_: Exception) {}
+        hasAudioFocus = false
+        audioManager = null
+    }
+
+    private fun pauseDetectionForAudioConflict() {
+        if (detector.isActive()) {
+            wasPausedForAudioConflict = true
+            detector.stopListening()
+            lifecycleScope.launch {
+                updateNotification()
+            }
+        }
+    }
+
+    private fun resumeDetectionAfterAudioConflict() {
+        if (wasPausedForAudioConflict && prefsManager != null) {
+            lifecycleScope.launch {
+                val enabled = prefsManager.isDetectionEnabled.first()
+                if (enabled) {
+                    startDetection()
+                }
+            }
+            wasPausedForAudioConflict = false
+        }
+    }
+
     private fun startDetection() {
         if (detector.isActive()) return
+
+        requestAudioFocus()
 
         lifecycleScope.launch {
             val sensitivityName = prefsManager.soundSensitivity.first()
@@ -159,6 +274,7 @@ class DetectionService : LifecycleService() {
 
     private fun stopDetection() {
         detector.stopListening()
+        releaseAudioFocus()
     }
 
     private fun restartDetection() {
@@ -173,51 +289,56 @@ class DetectionService : LifecycleService() {
         if (isAlerting) return
         isAlerting = true
 
-        // Mark as ever detected
-        lifecycleScope.launch {
-            prefsManager.setHasEverDetected(true)
+        try {
+            // Mark as ever detected
+            lifecycleScope.launch {
+                prefsManager.setHasEverDetected(true)
+            }
+
+            // Acquire wake lock to turn on screen
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                        PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                        PowerManager.ON_AFTER_RELEASE,
+                "ClapToFind:Alert"
+            ).apply {
+                acquire(3 * 60 * 1000L) // max 3 min
+            }
+
+            // Start the stop alert activity (full-screen overlay)
+            val intent = Intent(this, StopAlertActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            startActivity(intent)
+
+            // Play sound + vibration + flashlight
+            lifecycleScope.launch {
+                val volume = prefsManager.soundVolume.first()
+                val duration = prefsManager.soundDuration.first()
+                val soundName = prefsManager.selectedSound.first()
+                val flashMode = prefsManager.flashlightMode.first()
+                val vibrateMode = prefsManager.vibrateMode.first()
+                val flashEnabled = prefsManager.flashlightEnabled.first()
+                val vibrateEnabled = prefsManager.vibrateEnabled.first()
+
+                soundEngine.playAlert(
+                    volume = volume,
+                    durationSeconds = duration,
+                    soundName = soundName,
+                    flashMode = flashMode,
+                    vibrateMode = vibrateMode,
+                    flashlightEnabled = flashEnabled,
+                    vibrateEnabled = vibrateEnabled
+                )
+            }
+
+            // Show alert notification
+            showAlertNotification()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to trigger alert: ${e.message}", e)
+            stopAlert()
         }
-
-        // Acquire wake lock to turn on screen
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(
-            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
-                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                    PowerManager.ON_AFTER_RELEASE,
-            "ClapToFind:Alert"
-        ).apply {
-            acquire(3 * 60 * 1000L) // max 3 min
-        }
-
-        // Start the stop alert activity (full-screen overlay)
-        val intent = Intent(this, StopAlertActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-        startActivity(intent)
-
-        // Play sound + vibration + flashlight
-        lifecycleScope.launch {
-            val volume = prefsManager.soundVolume.first()
-            val duration = prefsManager.soundDuration.first()
-            val soundName = prefsManager.selectedSound.first()
-            val flashMode = prefsManager.flashlightMode.first()
-            val vibrateMode = prefsManager.vibrateMode.first()
-            val flashEnabled = prefsManager.flashlightEnabled.first()
-            val vibrateEnabled = prefsManager.vibrateEnabled.first()
-
-            soundEngine.playAlert(
-                volume = volume,
-                durationSeconds = duration,
-                soundName = soundName,
-                flashMode = flashMode,
-                vibrateMode = vibrateMode,
-                flashlightEnabled = flashEnabled,
-                vibrateEnabled = vibrateEnabled
-            )
-        }
-
-        // Show alert notification
-        showAlertNotification()
     }
 
     fun stopAlert() {
@@ -349,10 +470,13 @@ class DetectionService : LifecycleService() {
     }
 
     companion object {
+        const val TAG = "DetectionService"
         const val ACTION_TOGGLE_DETECTION = "com.claptofind.phone.ACTION_TOGGLE_DETECTION"
         const val ACTION_STOP_ALERT = "com.claptofind.phone.ACTION_STOP_ALERT"
         const val ACTION_ALERT_STOPPED = "com.claptofind.phone.ACTION_ALERT_STOPPED"
         const val EXTRA_STOP_ALERT_SCREEN = "stop_alert_screen"
+        const val ACTION_CHECK_SCHEDULE = "com.claptofind.phone.CHECK_SCHEDULE"
+        const val SCHEDULE_WORK_NAME = "clap_schedule_check"
 
         fun start(context: Context) {
             val intent = Intent(context, DetectionService::class.java)
@@ -373,5 +497,29 @@ class DetectionService : LifecycleService() {
             }
             context.startService(intent)
         }
+    }
+
+    // --- WorkManager periodic schedule check ---
+
+    private fun schedulePeriodicCheck() {
+        val workRequest = androidx.work.PeriodicWorkRequestBuilder<ScheduleCheckWorker>(
+            15, java.util.concurrent.TimeUnit.MINUTES
+        )
+            .addTag(SCHEDULE_WORK_NAME)
+            .build()
+
+        androidx.work.WorkManager.getInstance(this)
+            .enqueueUniquePeriodicWork(
+                SCHEDULE_WORK_NAME,
+                androidx.work.ExistingPeriodicWorkPolicy.UPDATE,
+                workRequest
+            )
+        Log.d(TAG, "Periodic schedule check scheduled (every 15 min)")
+    }
+
+    private fun cancelPeriodicCheck() {
+        androidx.work.WorkManager.getInstance(this)
+            .cancelUniqueWork(SCHEDULE_WORK_NAME)
+        Log.d(TAG, "Periodic schedule check cancelled")
     }
 }

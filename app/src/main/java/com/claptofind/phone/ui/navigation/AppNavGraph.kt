@@ -33,7 +33,7 @@ fun AppNavGraph(
         composable(Screen.LanguageSelect.route) {
             LanguageSelectScreen(
                 onLanguageSelected = {
-                    navController.navigate(Screen.Home.route) {
+                    navController.navigate(Screen.Onboarding.route) {
                         popUpTo(Screen.LanguageSelect.route) { inclusive = true }
                     }
                 }
@@ -42,7 +42,11 @@ fun AppNavGraph(
 
         composable(Screen.Onboarding.route) {
             HowToUseScreen(
-                onBack = { navController.popBackStack() }
+                onBack = {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Splash.route) { inclusive = true }
+                    }
+                }
             )
         }
 
@@ -62,12 +66,6 @@ fun AppNavGraph(
                 },
                 onNavigateToHowToUse = {
                     navController.navigate(Screen.HowToUse.route)
-                },
-                onEnableSuccess = {
-                    navController.navigate(Screen.EnableSuccess.route)
-                },
-                onDisableSuccess = {
-                    navController.navigate(Screen.DisableSuccess.route)
                 }
             )
         }
@@ -136,9 +134,7 @@ fun AppNavGraph(
         composable(Screen.EnableSuccess.route) {
             EnableSuccessScreen(
                 onBackToHome = {
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(Screen.Home.route) { inclusive = true }
-                    }
+                    navController.popBackStack(Screen.Home.route, false)
                 }
             )
         }
@@ -146,9 +142,7 @@ fun AppNavGraph(
         composable(Screen.DisableSuccess.route) {
             DisableSuccessScreen(
                 onBackToHome = {
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(Screen.Home.route) { inclusive = true }
-                    }
+                    navController.popBackStack(Screen.Home.route, false)
                 }
             )
         }

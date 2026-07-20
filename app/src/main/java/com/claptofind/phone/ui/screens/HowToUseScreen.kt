@@ -54,7 +54,7 @@ fun HowToUseScreen(
 
             GuideStep(
                 number = 1,
-                title = "Tap \"Activate\" and allow microphone access.",
+                title = "Turn on detection and allow microphone access.",
                 description = "Tap the main button on the home screen to enable detection. Grant microphone permission when prompted."
             )
 

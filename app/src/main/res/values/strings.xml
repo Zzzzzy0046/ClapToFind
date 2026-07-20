@@ -25,6 +25,7 @@
     <string name="apply">Apply</string>
     <string name="discard">Discard</string>
     <string name="apply_change_before_leaving">Apply change before leaving?</string>
+    <!-- Subscription strings — reserved for future billing integration -->
     <string name="sub_success">Subscription successful! Enjoy all premium features now.</string>
     <string name="sub_failed">Subscription failed. Please try again.</string>
     <string name="restore_success">Restored successfully!</string>

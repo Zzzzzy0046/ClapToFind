@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.claptofind.phone.ClapToFindApp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,7 +58,7 @@ fun FeedbackScreen(
                 .padding(16.dp)
         ) {
             Text(
-                "Describe any issue or idea so that can help us to improve.",
+                "Describe any issue or idea to help us improve.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
@@ -116,6 +117,10 @@ fun FeedbackScreen(
                         color = MaterialTheme.colorScheme.inverseOnSurface,
                         style = MaterialTheme.typography.bodyMedium
                     )
+                }
+                LaunchedEffect(Unit) {
+                    delay(3000)
+                    showThanksToast = false
                 }
             }
         }

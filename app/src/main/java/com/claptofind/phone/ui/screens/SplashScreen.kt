@@ -14,8 +14,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.claptofind.phone.ClapToFindApp
 import com.claptofind.phone.ui.theme.Primary
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SplashScreen(
@@ -31,15 +33,13 @@ fun SplashScreen(
 
     LaunchedEffect(Unit) {
         showContent = true
-        delay(3000)
-
+        // Brief branding display, then check preferences and navigate
         val app = ClapToFindApp.instance
-        val hasCompleted = app.prefsManager.run {
-            kotlinx.coroutines.runBlocking {
-                hasCompletedOnboarding.first()
-            }
+        val hasCompleted = withContext(Dispatchers.IO) {
+            app.prefsManager.hasCompletedOnboarding.first()
         }
 
+        delay(1200) // fade-in animation + brief branding
         if (hasCompleted) {
             onNavigateToHome()
         } else {

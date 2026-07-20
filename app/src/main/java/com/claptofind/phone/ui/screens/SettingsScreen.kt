@@ -113,10 +113,10 @@ fun SettingsScreen(
                         Text(
                             if (isPro) "All features unlocked" else "Unlock all premium features",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                         )
                     }
-                    Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color.Gray)
+                    Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
                 }
             }
 
@@ -131,7 +131,7 @@ fun SettingsScreen(
                 )
                 SettingsItem(
                     icon = Icons.Filled.Star,
-                    title = "Rate 5 stars",
+                    title = "Rate us",
                     subtitle = null,
                     onClick = onNavigateToRating
                 )
@@ -184,7 +184,7 @@ fun SettingsScreen(
                         Text(
                             "Detection pauses when screen is on and unlocked",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                         )
                     }
                     Switch(
@@ -215,7 +215,7 @@ fun SettingsScreen(
                 Text(
                     "Higher sound sensitivity lets your phone detect sound from farther away.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
 
@@ -241,7 +241,7 @@ fun SettingsScreen(
                         Text(
                             "Also respond to whistling sounds",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                         )
                     }
                     Switch(
@@ -402,17 +402,17 @@ private fun SettingsItem(
         Column(modifier = Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
             subtitle?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
             }
         }
         if (subtitle != null) {
-            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
         }
         Spacer(modifier = Modifier.width(8.dp))
         Icon(
             Icons.Filled.ChevronRight,
             contentDescription = null,
-            tint = Color.Gray.copy(alpha = 0.5f)
+            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
         )
     }
 }

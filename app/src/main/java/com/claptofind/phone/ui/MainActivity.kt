@@ -10,8 +10,9 @@ import androidx.navigation.compose.rememberNavController
 import com.claptofind.phone.ClapToFindApp
 import com.claptofind.phone.ui.navigation.AppNavGraph
 import com.claptofind.phone.ui.theme.ClapToFindTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -20,22 +21,25 @@ class MainActivity : ComponentActivity() {
 
         val app = application as ClapToFindApp
 
-        // Determine start destination
-        val hasCompletedOnboarding = runBlocking {
-            app.prefsManager.hasCompletedOnboarding.first()
-        }
-        val hasSelectedLanguage = runBlocking {
-            app.prefsManager.hasSelectedLanguage.first()
-        }
-
+        // Render UI immediately; determine start destination reactively
         setContent {
             ClapToFindTheme {
                 val navController = rememberNavController()
 
-                val startDestination = when {
-                    !hasCompletedOnboarding -> "splash"
-                    !hasSelectedLanguage -> "language_select"
-                    else -> "home"
+                var startDestination by remember { mutableStateOf("splash") }
+
+                LaunchedEffect(Unit) {
+                    val hasOnboarding = withContext(Dispatchers.IO) {
+                        app.prefsManager.hasCompletedOnboarding.first()
+                    }
+                    val hasLanguage = withContext(Dispatchers.IO) {
+                        app.prefsManager.hasSelectedLanguage.first()
+                    }
+                    startDestination = when {
+                        !hasOnboarding -> "splash"
+                        !hasLanguage -> "language_select"
+                        else -> "home"
+                    }
                 }
 
                 AppNavGraph(
@@ -55,7 +59,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        // Handle widget toggle or notification click
         when (intent.action) {
             "TOGGLE_DETECTION" -> {
                 // Handled by DetectionService

@@ -31,7 +31,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.claptofind.phone.service.DetectionService
-import com.claptofind.phone.ui.theme.*
+import com.claptofind.phone.ui.theme.ClapToFindTheme
+
+// Alert screen colors
+private val AlertRed = Color(0xFFE53935)
+private val AlertDarkRed = Color(0xFFB71C1C)
 
 /**
  * Full-screen activity shown when clap is detected.
@@ -69,10 +73,10 @@ class StopAlertActivity : ComponentActivity() {
         window.attributes = layoutParams
 
         // Register receiver for alert stopped
-        registerReceiver(alertStoppedReceiver, IntentFilter(DetectionService.ACTION_ALERT_STOPPED), RECEIVER_EXPORTED)
+        registerReceiver(alertStoppedReceiver, IntentFilter(DetectionService.ACTION_ALERT_STOPPED), RECEIVER_NOT_EXPORTED)
 
         setContent {
-            ClapToFindTheme(darkTheme = false) {
+            ClapToFindTheme {
                 StopAlertContent(
                     onStop = {
                         DetectionService.stopAlert(this)
@@ -122,7 +126,7 @@ fun StopAlertContent(
             .fillMaxSize()
             .background(
                 Brush.radialGradient(
-                    colors = listOf(Color(0xFFE53935), Color(0xFFB71C1C))
+                    colors = listOf(AlertRed, AlertDarkRed)
                 )
             ),
         contentAlignment = Alignment.Center
@@ -173,13 +177,13 @@ fun StopAlertContent(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
                                 Icons.Filled.Stop,
-                                contentDescription = "Stop",
-                                tint = Color(0xFFE53935),
+                                contentDescription = "Stop alert",
+                                tint = AlertRed,
                                 modifier = Modifier.size(48.dp)
                             )
                             Text(
                                 "STOP",
-                                color = Color(0xFFE53935),
+                                color = AlertRed,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 18.sp
                             )

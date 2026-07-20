@@ -11,17 +11,19 @@ import android.os.VibratorManager
 import com.claptofind.phone.data.FlashlightMode
 import com.claptofind.phone.data.VibrateMode
 import kotlinx.coroutines.*
-import java.util.concurrent.ConcurrentHashMap
 
 class SoundEngine(private val context: Context) {
 
     private val soundPool: SoundPool
     private val vibrator: Vibrator
+    private val toneGenerator = com.claptofind.phone.util.ToneGenerator(context)
+    private val flashlightController = FlashlightController(context)
 
-    private var isPlaying = false
+    @Volatile private var isPlaying = false
     private var flashlightJob: Job? = null
     private var vibrateJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var soundJob: Job? = null
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     init {
         val audioAttributes = AudioAttributes.Builder()
@@ -53,21 +55,35 @@ class SoundEngine(private val context: Context) {
     ) {
         stopAlert()
 
+        isPlaying = true
+
+        // Play sound via ToneGenerator (synthesized audio)
+        soundJob = scope.launch {
+            val durationMs = durationSeconds * 1000
+            val segmentMs = 2000 // loop the tone in 2-second segments
+            val endTime = System.currentTimeMillis() + durationMs
+            while (isActive && isPlaying && System.currentTimeMillis() < endTime) {
+                toneGenerator.playTone(soundName, volume, minOf(segmentMs, (endTime - System.currentTimeMillis()).toInt()))
+                delay(segmentMs.toLong())
+            }
+        }
+
         if (vibrateEnabled) {
             vibrateJob = scope.launch { startVibration(VibrateMode.fromDisplayName(vibrateMode), durationSeconds) }
         }
         if (flashlightEnabled) {
             flashlightJob = scope.launch { startFlashlight(FlashlightMode.fromDisplayName(flashMode), durationSeconds) }
         }
-
-        // Sound disabled for now — only vibrate + flashlight
-        isPlaying = true
     }
 
     fun playPreview(soundName: String, volume: Int) {
         stopAlert()
         isPlaying = true
-        scope.launch { playToneLoop(5) }
+        soundJob = scope.launch {
+            toneGenerator.playTone(soundName, volume, 2000)
+            delay(2000)
+            isPlaying = false
+        }
     }
 
     fun playFlashlightPreview(mode: FlashlightMode) {
@@ -82,6 +98,9 @@ class SoundEngine(private val context: Context) {
 
     fun stopAlert() {
         isPlaying = false
+        soundJob?.cancel()
+        soundJob = null
+        toneGenerator.stop()
         soundPool.autoPause()
         flashlightJob?.cancel()
         vibrateJob?.cancel()
@@ -92,24 +111,6 @@ class SoundEngine(private val context: Context) {
         stopAlert()
         soundPool.release()
         scope.cancel()
-    }
-
-    private suspend fun playToneLoop(durationSeconds: Int) {
-        val toneGenerator = android.media.ToneGenerator(AudioManager.STREAM_ALARM, 100)
-        val endTime = System.currentTimeMillis() + durationSeconds * 1000L
-        while (isPlaying && System.currentTimeMillis() < endTime) {
-            toneGenerator.startTone(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200)
-            delay(200)
-            toneGenerator.startTone(android.media.ToneGenerator.TONE_CDMA_ALERT_AUTOREDIAL_LITE, 200)
-            delay(300)
-            if (isPlaying && System.currentTimeMillis() < endTime) {
-                toneGenerator.startTone(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200)
-                delay(200)
-                toneGenerator.startTone(android.media.ToneGenerator.TONE_CDMA_PIP, 150)
-                delay(400)
-            }
-        }
-        toneGenerator.release()
     }
 
     private suspend fun startVibration(mode: VibrateMode, durationSeconds: Int) {
@@ -136,29 +137,30 @@ class SoundEngine(private val context: Context) {
             0L, 200, 100, 200, 500, 200, 100, 200, 500, 200, 100, 200
         )
         VibrateMode.RANDOM_PATTERN -> {
+            // Deterministic seed from current minute
+            val seed = (System.currentTimeMillis() / 60_000).toInt()
+            val rng = kotlin.random.Random(seed)
             val count = 10
             (0 until count).flatMap {
-                listOf((100..700).random().toLong(), (50..300).random().toLong())
+                listOf(rng.nextLong(100, 701), rng.nextLong(50, 301))
             }
         }
     }
 
     private suspend fun startFlashlight(mode: FlashlightMode, durationSeconds: Int) {
-        val flashlight = FlashlightController(context)
-        if (!flashlight.isAvailable()) return
+        if (!flashlightController.isAvailable()) return
         val endTime = System.currentTimeMillis() + durationSeconds * 1000L
         try {
             while (isActive() && System.currentTimeMillis() < endTime) {
                 val pattern = getFlashlightPattern(mode)
                 for ((index, state) in pattern.withIndex()) {
                     if (!isActive() || System.currentTimeMillis() >= endTime) break
-                    if (state) flashlight.turnOn() else flashlight.turnOff()
+                    if (state) flashlightController.turnOn() else flashlightController.turnOff()
                     delay(100L)
                 }
             }
         } finally {
-            flashlight.turnOff()
-            flashlight.release()
+            flashlightController.turnOff()
         }
     }
 
@@ -174,8 +176,13 @@ class SoundEngine(private val context: Context) {
             true, false, true, false, true
         )
         FlashlightMode.CONTINUOUS_BLINK -> BooleanArray(20) { true }
-        FlashlightMode.RANDOM_BLINK -> BooleanArray(20) { (0..1).random() == 1 }
+        FlashlightMode.RANDOM_BLINK -> {
+            // Deterministic seed from current minute — same pattern within same minute
+            val seed = (System.currentTimeMillis() / 60_000).toInt()
+            val rng = kotlin.random.Random(seed)
+            BooleanArray(20) { rng.nextInt(2) == 1 }
+        }
     }
 
-    private fun isActive(): Boolean = isPlaying || flashlightJob?.isActive == true || vibrateJob?.isActive == true
+    private fun isActive(): Boolean = isPlaying
 }

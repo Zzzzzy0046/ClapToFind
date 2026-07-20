@@ -16,7 +16,7 @@ class ToneGenerator(private val context: Context) {
 
     private val sampleRate = 44100
     private var audioTrack: AudioTrack? = null
-    private var isPlaying = false
+    @Volatile private var isPlaying = false
 
     /**
      * Generate and play a synthetic tone for the given sound name.
