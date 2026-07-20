@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:initialLayout="@layout/widget_find_phone"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:resizeMode="none"
+    android:widgetCategory="home_screen"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="40dp"
+    android:description="@string/app_name"
+    android:configure="com.claptofind.phone.ui.screens.WidgetConfigActivity" />

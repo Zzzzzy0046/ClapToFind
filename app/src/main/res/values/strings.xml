@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Clap To Find Phone</string>
+    <string name="splash_subtitle">Smart sound detection. Instant response.</string>
+    <string name="btn_activate">Click here to activate</string>
+    <string name="detecting_now">Detecting Now</string>
+    <string name="status_disabled">Click here to activate</string>
+    <string name="status_paused">Enabled – Temporarily paused until %1$s (Scheduled)</string>
+    <string name="widget_status_activate">Status: Activated</string>
+    <string name="widget_status_deactivate">Status: Deactivated</string>
+    <string name="widget_title">Clap To Find</string>
+    <string name="mic_permission_title">Microphone Permission Required</string>
+    <string name="mic_permission_body">To use \"Clap to Find Phone,\" we need access to your microphone. This allows the app to detect claps in the background and help you find your phone instantly.</string>
+    <string name="floating_window_title">Allow Floating Window</string>
+    <string name="floating_window_body">Required to show the ringing screen when your phone is found.</string>
+    <string name="notification_permission_title">Notification Permission Required</string>
+    <string name="notification_permission_body">Turn on notifications to control the feature in notification bar.</string>
+    <string name="enable_success">Clap to Find Phone is Now Activated!</string>
+    <string name="disable_success">Clap to Find Phone is Now Deactivated</string>
+    <string name="stop_alert_hint">Tap here or press the volume button to stop the ringing.</string>
+    <string name="alert_stopped">Alert stopped</string>
+    <string name="back_to_home">Back To Home</string>
+    <string name="got_it">Got it! Your phone is here.</string>
+    <string name="open_settings">Open Settings</string>
+    <string name="apply">Apply</string>
+    <string name="discard">Discard</string>
+    <string name="apply_change_before_leaving">Apply change before leaving?</string>
+    <string name="sub_success">Subscription successful! Enjoy all premium features now.</string>
+    <string name="sub_failed">Subscription failed. Please try again.</string>
+    <string name="restore_success">Restored successfully!</string>
+    <string name="restore_failed">Did not purchase the premium version</string>
+    <string name="subscribe_now">Subscribe Now</string>
+    <string name="cancel_anytime">Cancel Anytime</string>
+    <string name="start_free_trial">Start Free Trial</string>
+    <string name="terms_conditions">Terms &amp; Conditions</string>
+    <string name="restore">Restore</string>
+    <string name="thanks_feedback">Thanks for your feedback!</string>
+</resources>

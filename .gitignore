@@ -1,0 +1,31 @@
+# Dependencies
+.gradle/
+build/
+*/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.DS_Store
+
+# Local configuration
+local.properties
+
+# Secrets & sensitive
+*.keystore
+*.jks
+*.p12
+google-services.json
+.env
+
+# APK outputs
+*.apk
+*.aab
+
+# Temporary
+apk_analysis/
+*.log
+*.tmp
